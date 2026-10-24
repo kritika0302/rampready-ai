@@ -176,10 +176,10 @@ function Kpis({ plan }: { plan: ReturnType<typeof computePlan> }) {
 function ChartCard({ plan }: { plan: ReturnType<typeof computePlan> }) {
   const data = plan.rows.map((r) => ({ name: shortHour(r.hour), Workload: r.workload, "AI staff capacity": r.aiCapacity, "Fixed capacity": r.fixedCapacity, "Coverage gap": r.gap }));
   return (
-    <section className={`${card} p-5`}>
+    <section className={`${card} flex flex-col p-5`}>
       <h2 className="font-display text-lg font-semibold">Hourly workload vs staff capacity</h2>
       <p className="text-sm text-muted-foreground">Shaded band marks the peak period ({fmtHour(plan.peakStart)} – {fmtHour(plan.peakEnd)}). Red bars show workload fixed staffing cannot cover.</p>
-      <div className="mt-4 h-80">
+      <div className="mt-4 h-80 flex-1 xl:min-h-96">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart data={data} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -211,7 +211,7 @@ function Recommendation(p: {
   const reasons = [
     `Workload rises above 80% of the daily peak between ${fmtHour(plan.peakStart)} and ${fmtHour(plan.peakEnd)}, peaking at ${plan.peak.workload} points.`,
     extra > 0 ? `Fixed staffing covers only ${plan.peakCovFixed}% of peak workload, leaving ${plan.fixedUnder} understaffed hour${plan.fixedUnder === 1 ? "" : "s"}.` : `Fixed staffing already covers ${plan.peakCovFixed}% of peak workload.`,
-    plan.categories.fuel.add > 0 ? "Reserve one fueling specialist for overlapping service requests." : "Fueling demand stays within the existing specialist rota.",
+    extra > 0 ? "Reserve one fueling specialist for overlapping service requests." : "Fueling demand stays within the existing specialist rota.",
     `Scenario "${SCENARIOS[p.scenario].label}" applies a ×${SCENARIOS[p.scenario].multiplier.toFixed(2)} demand multiplier to the baseline.`,
     ...(p.closure ? ["One ramp zone is closed, reducing effective capacity per employee by 15%."] : []),
     ...(p.delayWave ? ["A 90-minute delay wave shifts midday arrivals into the 2–5 PM window, compounding overlap."] : []),

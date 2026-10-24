@@ -134,10 +134,10 @@ export function computePlan(inp: Inputs) {
 
   const rows: HourRow[] = HOURS.map((h, i) => {
     const workload = Math.round(wl[i]);
-    let aiStaff = Math.max(FIXED_STAFF, Math.ceil(workload / cap));
+    let aiStaff = Math.max(FIXED_STAFF, Math.ceil(workload / cap - 0.1));
     if (peakIdxs.has(i) && inp.manualAdj) aiStaff = Math.max(1, aiStaff + inp.manualAdj);
     const fixedCapacity = FIXED_STAFF * cap;
-    const gap = Math.max(0, workload - fixedCapacity);
+    const gap = workload - fixedCapacity > 0.75 ? workload - fixedCapacity : 0;
     const coverage = Math.min(100, Math.round((fixedCapacity / Math.max(1, workload)) * 100));
     const status: HourRow["status"] = gap > 0 ? "Coverage gap" : workload >= fixedCapacity * 0.85 ? "Peak watch" : "On plan";
     return { hour: h, arrivals: Math.round(arrivals[i]), workload, fixedStaff: FIXED_STAFF, aiStaff, fixedCapacity: Math.round(fixedCapacity), aiCapacity: Math.round(aiStaff * cap), gap: Math.round(gap), coverage, status };
@@ -156,8 +156,8 @@ export function computePlan(inp: Inputs) {
   const aiDelay = delayFor((r) => r.aiStaff);
   const delayReduction = fixedDelay > 0 ? Math.round(((fixedDelay - aiDelay) / fixedDelay) * 100) : 0;
 
-  const fixedUnder = rows.filter((r) => r.workload > FIXED_STAFF * cap).length;
-  const aiUnder = rows.filter((r) => r.workload > r.aiStaff * cap).length;
+  const fixedUnder = rows.filter((r) => r.gap > 0).length;
+  const aiUnder = rows.filter((r) => r.workload - r.aiStaff * cap > 0.75).length;
   const extraHours = rows.reduce((s, r) => s + Math.max(0, r.aiStaff - FIXED_STAFF), 0);
   const peakAircraft = peakRows.reduce((s, r) => s + r.arrivals, 0);
   const handled = (staffOf: (r: HourRow) => number) =>
