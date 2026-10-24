@@ -1,362 +1,98 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import {
-  Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from "recharts";
-import {
-  AlertTriangle, CheckCircle2, Clock, Fuel, Gauge, Info, Minus, Pencil, Plane, Plus, ShieldCheck, TrendingDown, Users, UserRound, Wrench,
-} from "lucide-react";
-import { computePlan, FIXED_STAFF, fmtHour, SCENARIOS, shortHour, type ScenarioId, type HourRow } from "@/lib/surge";
+import { createFileRoute } from '@tanstack/react-router';
+import { useMemo, useState } from 'react';
+import { Area, Bar, CartesianGrid, ComposedChart, Legend, Line, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { AlertTriangle, CheckCircle2, Clock, Copy, Download, Fuel, Gauge, Info, Minus, Plane, Plus, ShieldCheck, TrendingDown, Users, UserRound, Wrench, Radio, ArrowRight, Truck, MoveRight } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { computePlan, dispatchBrief, FLEET, fmtHour, HEAVY_PRESET, parseTelex, QUICK_PRESET, SCENARIOS, shortHour, type Plan, type ScenarioId, type TelexLoad, type WaveMode } from '@/lib/surge';
 
-export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "FBO SurgeGuard AI — Event-week staffing planner" },
-      { name: "description", content: "Explainable hourly workload forecasts and staffing recommendations for FBO ramp operations during Super Bowl week." },
-      { property: "og:title", content: "FBO SurgeGuard AI" },
-      { property: "og:description", content: "Prepare the ramp before demand lands. Explainable event-week staffing for FBOs." },
-      { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
-    ],
-  }),
-  component: Dashboard,
+export const Route = createFileRoute('/')({
+  head: () => ({meta: [
+    {title: 'FBO SurgeGuard AI — Shift & ramp operations planner'},
+    {name:'description',content:'Synthetic, explainable event-week staffing, ramp bottleneck and shift planning for a fictional FBO near Van Nuys Airport.'},
+    {property:'og:title',content:'FBO SurgeGuard AI — Prepare the ramp before demand lands'},
+    {property:'og:description',content:'Shift-feasible coverage, towing and fuel bottleneck planning with FBO manager approval.'},
+    {property:'og:type',content:'website'}, {name:'twitter:card',content:'summary_large_image'},
+  ]}), component: Dashboard,
 });
-
-const card = "rounded-2xl border border-border bg-card shadow-[var(--shadow-card)]";
-
+const itemCard = 'rounded-lg border border-border bg-card shadow-card';
+const field = 'w-full rounded-md border border-navy-border bg-sidebar-accent px-3 py-2.5 text-sm text-navy-foreground outline-none focus:ring-2 focus:ring-ring';
 function Dashboard() {
-  const [scenario, setScenario] = useState<ScenarioId>("sb-medium");
-  const [surge, setSurge] = useState(0);
-  const [closure, setClosure] = useState(false);
-  const [delayWave, setDelayWave] = useState(false);
-  const [manualAdj, setManualAdj] = useState(0);
-  const [editing, setEditing] = useState(false);
-  const [approved, setApproved] = useState(false);
-
-  const plan = useMemo(() => computePlan({ scenario, surge, closure, delayWave, manualAdj }), [scenario, surge, closure, delayWave, manualAdj]);
-  const touch = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setApproved(false); };
-
-  return (
-    <div className="min-h-screen bg-background font-sans text-foreground lg:flex">
-      <Sidebar
-        scenario={scenario} setScenario={touch(setScenario)}
-        surge={surge} setSurge={touch(setSurge)}
-        closure={closure} setClosure={touch(setClosure)}
-        delayWave={delayWave} setDelayWave={touch(setDelayWave)}
-      />
-      <main className="min-w-0 flex-1 space-y-6 p-4 sm:p-6 lg:p-8">
-        <Header />
-        {(closure || delayWave) && (
-          <div className="grid gap-3 md:grid-cols-2">
-            {closure && <Alert text="One ramp zone is unavailable, so effective service capacity is reduced and additional coverage is needed." />}
-            {delayWave && <Alert text="Delayed arrivals overlap during the afternoon peak, increasing workload and required staffing." />}
-          </div>
-        )}
-        <Kpis plan={plan} />
-        <div className="grid gap-6 xl:grid-cols-[1.6fr_1fr]">
-          <ChartCard plan={plan} />
-          <Recommendation plan={plan} scenario={scenario} closure={closure} delayWave={delayWave}
-            editing={editing} setEditing={setEditing} manualAdj={manualAdj} setManualAdj={touch(setManualAdj)}
-            approved={approved} setApproved={setApproved} />
-        </div>
-        <div className="grid gap-6 xl:grid-cols-[1fr_1.6fr]">
-          <Categories plan={plan} closure={closure} delayWave={delayWave} />
-          <Impact plan={plan} />
-        </div>
-        <HourlyTable rows={plan.rows} />
-        <footer className="flex items-start gap-3 rounded-2xl border border-border bg-secondary p-4 text-sm text-secondary-foreground">
-          <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-success" />
-          <p>Synthetic planning data. SurgeGuard supports FBO preparation; it does not authorize aircraft movement, override ramp-safety procedures, or replace airport personnel. Final staffing decisions remain with the FBO manager.</p>
-        </footer>
-      </main>
-    </div>
-  );
-}
-
-function Sidebar(p: {
-  scenario: ScenarioId; setScenario: (v: ScenarioId) => void; surge: number; setSurge: (v: number) => void;
-  closure: boolean; setClosure: (v: boolean) => void; delayWave: boolean; setDelayWave: (v: boolean) => void;
-}) {
-  return (
-    <aside className="bg-navy p-6 text-navy-foreground lg:sticky lg:top-0 lg:h-screen lg:w-80 lg:shrink-0 lg:overflow-y-auto">
-      <div className="flex items-center gap-3">
-        <div className="grid h-11 w-11 place-items-center rounded-xl bg-primary"><Plane className="h-6 w-6 -rotate-45 text-primary-foreground" /></div>
-        <div>
-          <p className="font-display text-lg font-bold leading-tight">FBO SurgeGuard AI</p>
-          <p className="text-xs text-navy-muted">Event-week operations planner</p>
-        </div>
-      </div>
-      <div className="mt-8 space-y-6">
-        <label className="block">
-          <span className="text-xs font-semibold uppercase tracking-wider text-navy-muted">Demand scenario</span>
-          <select value={p.scenario} onChange={(e) => p.setScenario(e.target.value as ScenarioId)}
-            className="mt-2 w-full rounded-lg border border-navy-border bg-sidebar-accent px-3 py-2.5 text-sm text-navy-foreground outline-none focus:ring-2 focus:ring-ring">
-            {Object.entries(SCENARIOS).map(([id, s]) => <option key={id} value={id}>{s.label} (×{s.multiplier.toFixed(2)})</option>)}
-          </select>
-        </label>
-        <label className="block">
-          <div className="flex justify-between text-xs font-semibold uppercase tracking-wider text-navy-muted">
-            <span>Arrival surge</span><span className="font-mono text-cyan">+{p.surge}%</span>
-          </div>
-          <input type="range" min={0} max={70} step={5} value={p.surge} onChange={(e) => p.setSurge(Number(e.target.value))} className="mt-3 w-full accent-[var(--cyan-strong)]" />
-          <div className="flex justify-between text-[10px] text-navy-muted"><span>0%</span><span>70%</span></div>
-        </label>
-        <div className="space-y-3">
-          <span className="text-xs font-semibold uppercase tracking-wider text-navy-muted">Disruption simulations</span>
-          <Toggle checked={p.closure} onChange={p.setClosure} label="Simulate one ramp zone closed" />
-          <Toggle checked={p.delayWave} onChange={p.setDelayWave} label="Simulate a 90-minute delay wave" />
-        </div>
-        <div className="rounded-xl border border-navy-border bg-sidebar-accent p-4">
-          <p className="flex items-center gap-2 text-sm font-semibold"><Info className="h-4 w-4 text-cyan" />How the AI helps</p>
-          <ul className="mt-2 space-y-1.5 text-xs leading-relaxed text-navy-muted">
-            <li>• Forecasts hourly aircraft-service workload</li>
-            <li>• Recommends targeted staffing coverage</li>
-            <li>• Explains uncertainty with a confidence score</li>
-            <li>• Keeps the manager in control — nothing is applied without approval</li>
-          </ul>
-        </div>
+  const [scenario,setScenario] = useState<ScenarioId>('sb-medium');
+  const [wave,setWave] = useState<WaveMode>('arrival');
+  const [surge,setSurge] = useState(0);
+  const [closure,setClosure] = useState(false), [delayWave,setDelayWave] = useState(false);
+  const [preStage,setPreStage] = useState(true), [topOff,setTopOff] = useState(true);
+  const [manualAdj,setManualAdj] = useState(0), [injections,setInjections] = useState<TelexLoad[]>([]);
+  const [telex,setTelex] = useState(''), [parserError,setParserError] = useState('');
+  const [approvedAt,setApprovedAt] = useState<string|null>(null), [copied,setCopied] = useState(false);
+  const [tab,setTab] = useState<'hours'|'manifest'>('hours');
+  const plan = useMemo(()=>computePlan({scenario,wave,surge,closure,delayWave,manualAdj,injections,preStage,topOff}),[scenario,wave,surge,closure,delayWave,manualAdj,injections,preStage,topOff]);
+  const change = <T,>(setter: (v:T)=>void) => (v:T) => {setter(v);setApprovedAt(null);setCopied(false);};
+  const inject = (text: string) => {
+    setTelex(text); const result = parseTelex(text);
+    if (!result.load) {setParserError(result.error ?? 'Unable to interpret message.');return;}
+    const load = result.load;
+    if (injections.some(a=>a.id===load.id)) {setParserError('This message is already included in the plan. Remove it before re-injecting.');return;}
+    setParserError('');change(setInjections)([...injections,load]);
+  };
+  const brief = approvedAt ? dispatchBrief(plan,approvedAt,scenario) : '';
+  async function copyBrief() {
+    try {await navigator.clipboard.writeText(brief);setCopied(true);} catch {setCopied(false);setParserError('Clipboard unavailable. Download the dispatch brief instead.');}
+  }
+  function downloadBrief() {
+    const url = URL.createObjectURL(new Blob([brief],{type:'text/plain'}));
+    const a = document.createElement('a');a.href=url;a.download='SurgeGuard-shift-dispatch.txt';a.click();URL.revokeObjectURL(url);
+  }
+  return <div className="min-h-screen bg-background font-sans text-foreground lg:flex">
+    <aside className="bg-navy p-5 text-navy-foreground lg:sticky lg:top-0 lg:h-screen lg:w-80 lg:shrink-0 lg:overflow-y-auto">
+      <div className="flex items-center gap-3"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg bg-primary"><Plane className="h-6 w-6 -rotate-45 text-primary-foreground"/></div><div><p className="font-display text-lg font-bold">FBO SurgeGuard AI</p><p className="text-xs text-navy-muted">Event-week operations planner</p></div></div>
+      <div className="mt-6 flex items-center gap-2 border-y border-navy-border py-3 text-xs text-cyan"><Radio className="h-3.5 w-3.5"/>VNY OPS / SYNTHETIC PLANNING</div>
+      <div className="mt-6 space-y-5">
+        <div><Label>Operating wave mode</Label><div className="mt-2 space-y-2">{(['arrival','exodus'] as const).map(mode=><Button key={mode} variant="ghost" aria-pressed={wave===mode} onClick={()=>change(setWave)(mode)} className={`h-auto w-full justify-start whitespace-normal border p-3 text-left leading-relaxed ${wave===mode?'border-cyan bg-sidebar-accent text-cyan':'border-navy-border text-navy-muted'}`}>{mode==='arrival'?'Arrival & Midday Turn Surge (Thu–Sat)':'Monday Morning Post-Game Exodus Wave'}{wave===mode&&<CheckCircle2 className="ml-auto"/>}</Button>)}</div></div>
+        <label className="block"><Label>Demand scenario</Label><select className={`${field} mt-2`} value={scenario} onChange={e=>change(setScenario)(e.target.value as ScenarioId)}>{Object.entries(SCENARIOS).map(([id,s])=><option key={id} value={id}>{s.label} (×{s.multiplier.toFixed(2)})</option>)}</select></label>
+        <label className="block"><div className="flex justify-between"><Label>Arrival surge</Label><span className="font-mono text-sm text-cyan">+{surge}%</span></div><input aria-label="Arrival surge" type="range" min={0} max={70} step={1} value={surge} onChange={e=>change(setSurge)(Number(e.target.value))} className="mt-3 w-full accent-[var(--cyan-strong)]"/><div className="flex justify-between text-xs text-navy-muted"><span>0%</span><span>70%</span></div></label>
+        <div className="space-y-2"><Label>Disruption stress tests</Label><SideCheck checked={closure} onChange={change(setClosure)} label="Simulate one ramp zone closed"/><SideCheck checked={delayWave} onChange={change(setDelayWave)} label="Simulate a 90-minute delay wave"/></div>
+        <section className="border-t border-navy-border pt-5"><h2 className="flex items-center gap-2 text-sm font-semibold"><Radio className="h-4 w-4 text-cyan"/>Live Pilot / Charter Telex NLP Parser</h2><textarea aria-label="Pilot or charter telex" rows={4} className={`${field} mt-3 resize-y`} placeholder="G650 at 14:15, 1,850 gal Jet-A, VIP escort…" value={telex} onChange={e=>setTelex(e.target.value)}/><Button onClick={()=>inject(telex)} disabled={!telex.trim()} className="mt-2 w-full"><ArrowRight/>Parse & add to plan</Button><div className="mt-3 space-y-2"><Button variant="ghost" className="h-auto w-full justify-start whitespace-normal border border-navy-border px-3 py-2 text-left text-xs text-cyan" onClick={()=>inject(HEAVY_PRESET)}><Plus/>Inject Heavy Jet Wave</Button><Button variant="ghost" className="h-auto w-full justify-start whitespace-normal border border-navy-border px-3 py-2 text-left text-xs text-cyan" onClick={()=>inject(QUICK_PRESET)}><Plus/>Inject Quick-Turn Tech Stop</Button></div>{parserError&&<p role="alert" className="mt-2 text-xs text-warning">{parserError}</p>}
+          {injections.map(a=><div key={a.id} className="mt-3 border-l-2 border-cyan pl-3"><div className="flex justify-between gap-2"><p className="text-xs">{a.aircraft}× {a.heavy?'Heavy cabin jet':'Business jet'} · {shortHour(a.hour)}</p><Button variant="ghost" size="icon" className="h-6 w-6 text-navy-muted" aria-label="Remove telex" title="Remove telex" onClick={()=>change(setInjections)(injections.filter(v=>v.id!==a.id))}><Minus/></Button></div><div className="mt-2 flex flex-wrap gap-1">{[`+${a.fuelGallons.toLocaleString()} fuel gal`,...(a.crew?[`+${a.crew}-person wing-walk crew`]:[]),`+${a.workload} workload units`].map(b=><span key={b} className="rounded bg-sidebar-accent px-2 py-1 font-mono text-[10px] text-cyan">{b}</span>)}</div></div>)}
+          <p className="mt-3 text-[10px] text-navy-muted">Local rule-based extraction · synthetic messages only</p>
+        </section>
+        <section className="border-t border-navy-border pt-4"><h2 className="flex items-center gap-2 text-sm font-semibold"><Info className="h-4 w-4 text-cyan"/>How the AI helps</h2><div className="mt-3 grid grid-cols-2 gap-3 text-xs text-navy-muted"><span>Workload prediction</span><span>Bottleneck detection</span><span>Shift optimization</span><span>Scenario adaptation</span></div></section>
       </div>
     </aside>
-  );
+    <main className="min-w-0 flex-1 space-y-7 p-4 sm:p-6 xl:p-8">
+      <header className="border-b border-border pb-6"><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs font-medium text-primary">Van Nuys (VNY) · Los Angeles · Seven-day planning window</p><span role="status" className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${approvedAt?'bg-success-soft text-success':'bg-warning-soft text-foreground'}`}><ShieldCheck className="h-4 w-4"/>{approvedAt?'Approved by FBO Manager (Shift Plan Locked)':'Human review required'}</span></div><h1 className="mt-4 max-w-3xl font-display text-3xl font-bold sm:text-4xl">Prepare the ramp before demand lands.</h1><p className="mt-3 max-w-3xl text-sm leading-relaxed text-muted-foreground">SurgeGuard forecasts hourly aircraft-service workload, detects physical ramp bottlenecks, and recommends shift-feasible staffing coverage for event-week operations.</p><div className="mt-4 flex flex-wrap gap-4 text-xs text-muted-foreground"><span>THE INTELLIGENT FBO / STAFFING & SERVICE WORKLOAD</span><span className="font-mono">08:00–19:00 · {wave==='arrival'?'THU–SAT ARRIVAL WAVE':'MONDAY EXODUS WAVE'}</span></div></header>
+      {(closure||delayWave)&&<div className="grid gap-3 md:grid-cols-2">{closure&&<Alert text="One ramp zone is unavailable, so effective service capacity is reduced and additional coverage is needed."/>}{delayWave&&<Alert text={wave==='arrival'?'Delayed arrivals overlap during the afternoon peak, increasing workload and required staffing.':'Delayed arrivals overlap during the morning exodus, increasing workload and required staffing.'}/>}</div>}
+      <Kpis plan={plan}/>
+      <section className="border-b border-border pb-6"><div className="flex flex-wrap items-center justify-between gap-3"><SectionTitle index="01" title="Workload & capacity"/><span className="text-xs text-muted-foreground">9 baseline staff · 8 units / employee / hour{closure?' · capacity reduced 20%':''}</span></div><Chart plan={plan}/><div className="mt-3 grid gap-3 sm:grid-cols-2"><Mitigation checked={preStage} onChange={change(setPreStage)} active={plan.event} title={`${plan.preStageTime} · Row-1 pre-stage`} sub={`SB-104 · 3-person tow crew · ${plan.savedRampMinutes} ramp minutes saved`} icon="tow"/><Mitigation checked={topOff} onChange={change(setTopOff)} active={plan.fuelRisk} title={`${plan.topOffTime} · Fuel Truck #2 top-off`} sub={plan.fuelRisk?`5,000-gal threshold · avoids 40-min refill loss`:'Fuel demand within peak truck threshold'} icon="fuel"/></div></section>
+      <Recommendation plan={plan} scenario={scenario} closure={closure} delayWave={delayWave} manualAdj={manualAdj} setManualAdj={change(setManualAdj)} approved={!!approvedAt} approve={()=>setApprovedAt(new Date().toLocaleString('en-US',{timeZone:'America/Los_Angeles',timeZoneName:'short'}))} unapprove={()=>setApprovedAt(null)}/>
+      {approvedAt&&<section className="border-y border-success py-5"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="flex items-center gap-2 font-display text-lg font-semibold"><ShieldCheck className="h-5 w-5 text-success"/>Official Super Bowl Shift & Ramp Pre-Stage Dispatch Brief</h2><div className="flex gap-2"><Button variant="outline" onClick={copyBrief}><Copy/>{copied?'Copied':'Copy'}</Button><Button variant="outline" onClick={downloadBrief}><Download/>Download</Button></div></div><pre className="mt-4 whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-muted-foreground">{brief}</pre></section>}
+      <Categories plan={plan}/><Impact plan={plan}/>
+      <section className="border-t border-border pt-5"><div className="flex flex-wrap items-center justify-between gap-3"><SectionTitle index="05" title="Operations detail"/><div className="flex gap-1" role="tablist" aria-label="Operations view"><Button role="tab" aria-selected={tab==='hours'} variant={tab==='hours'?'default':'ghost'} onClick={()=>setTab('hours')}>Hourly operations</Button><Button role="tab" aria-selected={tab==='manifest'} variant={tab==='manifest'?'default':'ghost'} onClick={()=>setTab('manifest')}>Flight manifest · 18</Button></div></div><div role="tabpanel" className="mt-4 overflow-x-auto">{tab==='hours'?<HourlyTable plan={plan}/>:<Manifest/>}</div></section>
+      <footer className="flex gap-3 border-t border-border py-5 text-xs leading-relaxed text-muted-foreground"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-success"/><p>Synthetic planning data. SurgeGuard supports FBO preparation; it does not authorize aircraft movement, override ramp-safety procedures, or replace airport personnel. Final staffing decisions remain with the FBO manager.</p></footer>
+    </main>
+  </div>;
 }
-
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
-  return (
-    <label className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors ${checked ? "border-warning bg-sidebar-accent" : "border-navy-border"}`}>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 accent-[var(--warning)]" />
-      {label}
-    </label>
-  );
+function Label({children}:{children:React.ReactNode}) {return <span className="text-xs font-semibold uppercase text-navy-muted">{children}</span>;}
+function SideCheck({checked,onChange,label}:{checked:boolean;onChange:(v:boolean)=>void;label:string}) {return <label className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm ${checked?'border-warning bg-sidebar-accent':'border-navy-border'}`}><input type="checkbox" className="mt-1 shrink-0 accent-[var(--warning)]" checked={checked} onChange={e=>onChange(e.target.checked)}/>{label}</label>;}
+function SectionTitle({index,title}:{index:string;title:string}) {return <h2 className="flex items-center gap-3 font-display text-lg font-semibold"><span className="font-mono text-xs text-primary">{index}</span>{title}</h2>;}
+function Alert({text}:{text:string}) {return <div role="alert" className="flex items-start gap-3 rounded-md border border-warning bg-warning-soft p-3 text-sm"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning"/>{text}</div>;}
+function Kpis({plan:p}:{plan:Plan}) {
+  const items=[{icon:Plane,label:'Expected aircraft today',value:p.expectedAircraft,sub:`${p.heavyAircraft} heavy cabin jets`},{icon:Gauge,label:'Peak workload',value:p.peak.workload,sub:`${fmtHour(p.peak.hour)} · service units`},{icon:Users,label:'Peak staff required',value:p.peakStaff,sub:'AI recommended vs. 9 fixed'},{icon:Clock,label:'Projected delay',value:`${p.aiDelay} min`,sub:`vs. ${p.fixedDelay} min under fixed staffing`},{icon:TrendingDown,label:'Delay reduction',value:`${p.delayReduction}%`,sub:'vs. fixed staffing'}];
+  return <div><div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">{items.map(k=><div key={k.label} className={`${itemCard} p-4`}><div className="flex items-center gap-2 text-xs text-muted-foreground"><k.icon className="h-4 w-4 shrink-0"/>{k.label}</div><p className="mt-3 font-display text-3xl font-bold text-primary">{k.value}</p><p className="mt-1 text-xs text-muted-foreground">{k.sub}</p></div>)}</div><div className="mt-3 flex flex-wrap gap-2">{p.fuelRisk&&<Badge warning={!p.topOff}>Fuel Truck Refill Risk · {p.topOff?'mitigated':'active'}</Badge>}{p.event&&<Badge warning={!p.preStage}>Row-1 Dig-Out Pre-Stage · {p.preStage?'scheduled':'disabled'}</Badge>}<span className="ml-auto text-[10px] text-muted-foreground">Synthetic estimates · illustrative, not operational guarantees</span></div></div>;
 }
-
-function Header() {
-  return (
-    <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-primary">Van Nuys · Los Angeles · seven-day planning window</p>
-        <h1 className="mt-2 font-display text-3xl font-bold tracking-tight sm:text-4xl">Prepare the ramp before demand lands.</h1>
-        <p className="mt-2 max-w-2xl text-muted-foreground">SurgeGuard forecasts hourly aircraft-service workload and recommends targeted staffing coverage for event-week operations — compared side by side with the fixed baseline of {FIXED_STAFF} employees per hour.</p>
-      </div>
-      <span className="inline-flex shrink-0 items-center gap-2 self-start rounded-full bg-success-soft px-3 py-1.5 text-sm font-medium text-success">
-        <span className="h-2 w-2 rounded-full bg-success" />Human review required
-      </span>
-    </header>
-  );
+function Badge({children,warning=false}:{children:React.ReactNode;warning?:boolean}) {return <span className={`rounded px-2 py-1 text-[10px] font-semibold ${warning?'bg-warning-soft text-foreground':'bg-success-soft text-success'}`}>{children}</span>;}
+function Chart({plan:p}:{plan:Plan}) {
+  const data=p.rows.map(r=>({name:shortHour(r.hour),Workload:r.workload,'Fixed capacity':r.fixedCapacity,'AI capacity':r.aiCapacity,'Fixed coverage gap':r.gap,'Unmitigated workload':r.fixedWorkload}));
+  return <div><div className="mt-4 flex flex-wrap justify-between gap-2 text-xs text-muted-foreground"><span>Peak: {fmtHour(p.peakStart)}–{fmtHour(p.peakEnd)}</span><span>Pre-stage: {p.preStageTime} · Top-off: {p.topOffTime}</span></div><div className="mt-3 h-80 w-full min-w-0"><ResponsiveContainer width="100%" height="100%"><ComposedChart data={data} margin={{top:20,right:10,left:-20,bottom:0}}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3"/><XAxis dataKey="name" tick={{fontSize:10,fill:'var(--muted-foreground)'}}/><YAxis tick={{fontSize:11,fill:'var(--muted-foreground)'}}/><Tooltip contentStyle={{background:'var(--popover)',color:'var(--popover-foreground)',border:'1px solid var(--border)',borderRadius:6,fontSize:12}}/><Legend wrapperStyle={{fontSize:11}}/><ReferenceArea x1={shortHour(p.peakStart)} x2={shortHour(p.peakEnd-1)} fill="var(--warning)" fillOpacity={.12} label={{value:'PEAK WAVE',fontSize:10,position:'insideTop',fill:'var(--foreground)'}}/><Area type="monotone" dataKey="Workload" fill="var(--cyan)" stroke="var(--cyan-strong)" fillOpacity={.45}/><Bar dataKey="Fixed coverage gap" fill="var(--destructive)" barSize={10} radius={[3,3,0,0]}/><Line type="stepAfter" dataKey="AI capacity" stroke="var(--primary)" strokeWidth={2.5} dot={false}/><Line type="stepAfter" dataKey="Fixed capacity" stroke="var(--muted-foreground)" strokeDasharray="5 4" dot={false}/><Line type="monotone" dataKey="Unmitigated workload" stroke="var(--warning)" strokeDasharray="2 3" dot={false}/></ComposedChart></ResponsiveContainer></div></div>;
 }
-
-function Alert({ text }: { text: string }) {
-  return (
-    <div className="flex items-start gap-3 rounded-xl border border-warning bg-warning-soft p-3 text-sm">
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />{text}
-    </div>
-  );
+function Mitigation({checked,onChange,active,title,sub,icon}:{checked:boolean;onChange:(v:boolean)=>void;active:boolean;title:string;sub:string;icon:string}) {const Icon=icon==='tow'?MoveRight:Truck;return <label className="flex cursor-pointer items-center gap-3 border-l-2 border-primary bg-secondary p-3"><Icon className="h-5 w-5 shrink-0 text-primary"/><div className="min-w-0 flex-1"><p className="text-sm font-semibold">{title}</p><p className="mt-1 text-xs text-muted-foreground">{sub}</p></div><input aria-label={icon==='tow'?'Proactive pre-stage tow':'Proactive fuel truck top-off'} type="checkbox" checked={checked} disabled={!active} onChange={e=>onChange(e.target.checked)} className="shrink-0 accent-[var(--primary)]"/></label>;}
+function Recommendation({plan:p,scenario,closure,delayWave,manualAdj,setManualAdj,approved,approve,unapprove}:{plan:Plan;scenario:ScenarioId;closure:boolean;delayWave:boolean;manualAdj:number;setManualAdj:(v:number)=>void;approved:boolean;approve:()=>void;unapprove:()=>void}) {
+  const extra=Math.max(0,p.peakStaff-9),s=p.shifts;
+  const reasons=[`${SCENARIOS[scenario].label} (×${SCENARIOS[scenario].multiplier.toFixed(2)}): ${p.wave==='arrival'?'overlapping arrivals and large-cabin turnarounds':'post-game departures and heavy-jet fuel uplifts'} peak ${fmtHour(p.peakStart)}–${fmtHour(p.peakEnd)} at ${p.peak.workload} service units.`,`${p.wingMultiplier===1.35?'Congestion lock applies ×1.35 to large-jet towing workload.':'No congestion multiplier needed.'} Every modeled large-jet tow reserves 1 tug driver + 2 wing-walkers simultaneously.`,p.event?`SB-104, blocked by 2 jets: ${p.preStage?`${p.preStageTime} Row-3 pre-stage saves 45 ramp minutes before the ${fmtHour(p.towHour)} dig-out.`:'60-minute, 3-person dig-out remains in the peak wave.'}`:'Ordinary week: no three-row event stacking is assumed.',p.fuelRisk?`Peak Jet-A demand exceeds 5,000 gal at ${fmtHour(p.fuelRiskHour??p.peak.hour)}. ${p.topOff?`Truck #2 top-off at ${p.topOffTime} prevents a 40-minute fueler/truck refill loss.`:'Truck and fueler lose 40 minutes for refill and sump-test.'}`:'Peak Jet-A demand does not cross the 5,000-gal fuel-truck threshold.',...(closure?['Closed ramp zone reduces effective service capacity by 20%.']:[]),...(delayWave?['The 90-minute delay wave redistributes midday services into the selected peak wave.']:[])];
+  return <section className="border-b border-border pb-6"><SectionTitle index="02" title="AI staffing recommendation"/><div className="mt-4 grid gap-6 xl:grid-cols-[1.35fr_1fr]"><div><p className="font-display text-2xl font-bold">{extra?`Add +${extra} peak coverage staff`:'Keep 9-person baseline coverage'} <span className="text-primary">{fmtHour(p.peakStart)}–{fmtHour(p.peakEnd)}</span></p><p className="mt-2 text-sm text-muted-foreground">{p.event&&p.preStage?`Pre-stage SB-104 at ${p.preStageTime}. `:''}{p.fuelRisk&&p.topOff?`Top off Fuel Truck #2 at ${p.topOffTime}. `:''}Staffing uses qualified shift blocks, not hourly gig workers.</p><ul className="mt-4 space-y-3">{reasons.map(r=><li key={r} className="flex gap-2 text-sm leading-relaxed"><CheckCircle2 className="mt-1 h-4 w-4 shrink-0 text-primary"/>{r}</li>)}</ul></div><div className="border-l-2 border-primary pl-5"><h3 className="flex items-center gap-2 font-semibold"><Clock className="h-4 w-4 text-primary"/>Shift-feasible execution plan</h3><div className="mt-4 space-y-3 text-sm"><Shift count={s.bridgeStaff} title="Peak bridge ramp techs" time={`${s.bridgeStart}–${s.bridgeEnd} · 8.5-hour block`} sub="Reassign qualified morning techs; backfill morning duties before dispatch."/><Shift count={s.fuelOvertime} title="Fueling specialist overtime hold" time={`${s.overtimeStart}–${s.overtimeEnd} · 2 hours`} sub="Retain certified morning fuelers through the peak."/><Shift count={s.csrFloat} title="Cross-utilized CSR float" time="Planeside luggage / VIP escort" sub="Already included in 2 baseline CSRs; not certified tow or fueling cover."/></div><p className="mt-3 text-xs text-muted-foreground">Hourly demand targets require roster availability and break coverage to be confirmed by the manager. {p.peakEnd> (p.wave==='arrival'?16:11)&&s.fuelOvertime>0?'Fuel coverage after the hold requires the scheduled afternoon shift handoff.':''}</p><div className="mt-5 flex justify-between text-sm"><span>Forecast confidence</span><span className="font-mono font-semibold">{p.confidence}%</span></div><progress aria-label="Forecast confidence" max={100} value={p.confidence} className="confidence mt-2 h-2 w-full"/>{p.confidence<80&&<p className="mt-2 text-xs text-warning">Lower-confidence forecast — additional manager review recommended</p>}<div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4"><span className="text-sm">Manager peak override</span><div className="flex items-center gap-2"><Button size="icon" variant="outline" aria-label="Decrease peak staff" title="Decrease peak staff" disabled={manualAdj<=-8} onClick={()=>setManualAdj(manualAdj-1)}><Minus/></Button><span className="w-9 text-center font-mono text-sm">{manualAdj>0?'+':''}{manualAdj}</span><Button size="icon" variant="outline" aria-label="Increase peak staff" title="Increase peak staff" disabled={manualAdj>=20} onClick={()=>setManualAdj(manualAdj+1)}><Plus/></Button></div></div>{(p.aiUnder>0||!p.safetyAi)&&<p role="alert" className="mt-3 text-xs text-destructive">Override or roster constraints leave coverage / tow-crew feasibility at risk. Supervisor review required.</p>}<Button className="mt-4 h-auto w-full whitespace-normal py-3" variant={approved?'outline':'default'} onClick={approved?unapprove:approve}><ShieldCheck/>{approved?'Unlock approved plan':'Approve & Generate Shift Dispatch Brief'}</Button><p className="mt-2 text-[10px] text-muted-foreground">Manager approval is a planning sign-off only. Ramp supervisor clearance is still required.</p></div></div></section>;
 }
-
-function Kpis({ plan }: { plan: ReturnType<typeof computePlan> }) {
-  const items = [
-    { icon: Plane, label: "Expected aircraft today", value: plan.expectedAircraft, sub: "8 AM – 8 PM arrivals" },
-    { icon: Gauge, label: "Peak workload", value: plan.peak.workload, sub: `at ${fmtHour(plan.peak.hour)}` },
-    { icon: Users, label: "Peak staff required", value: plan.peakStaff, sub: `vs ${FIXED_STAFF} fixed`, accent: "text-primary" },
-    { icon: Clock, label: "Projected delay", value: `${plan.aiDelay} min`, sub: `fixed: ${plan.fixedDelay} min` },
-    { icon: TrendingDown, label: "Delay reduction", value: `${plan.delayReduction}%`, sub: "vs fixed staffing", accent: "text-success" },
-  ];
-  return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
-      {items.map((k) => (
-        <div key={k.label} className={`${card} p-4`}>
-          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><k.icon className="h-4 w-4" />{k.label}</div>
-          <p className={`mt-2 font-display text-3xl font-bold ${k.accent ?? ""}`}>{k.value}</p>
-          <p className="text-xs text-muted-foreground">{k.sub}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ChartCard({ plan }: { plan: ReturnType<typeof computePlan> }) {
-  const data = plan.rows.map((r) => ({ name: shortHour(r.hour), Workload: r.workload, "AI staff capacity": r.aiCapacity, "Fixed capacity": r.fixedCapacity, "Coverage gap": r.gap }));
-  return (
-    <section className={`${card} flex flex-col p-5`}>
-      <h2 className="font-display text-lg font-semibold">Hourly workload vs staff capacity</h2>
-      <p className="text-sm text-muted-foreground">Shaded band marks the peak period ({fmtHour(plan.peakStart)} – {fmtHour(plan.peakEnd)}). Red bars show workload fixed staffing cannot cover.</p>
-      <div className="mt-4 h-80 flex-1 xl:min-h-96">
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={data} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-            <XAxis dataKey="name" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
-            <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} />
-            <Tooltip contentStyle={{ borderRadius: 10, border: "1px solid var(--border)" }} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <ReferenceArea x1={shortHour(plan.peakStart)} x2={shortHour(plan.peakEnd - 1)} fill="var(--warning)" fillOpacity={0.12} label={{ value: "Peak", position: "insideTop", fontSize: 11, fill: "var(--foreground)" }} />
-            <Area type="monotone" dataKey="Workload" fill="var(--cyan)" stroke="var(--cyan-strong)" fillOpacity={0.55} />
-            <Bar dataKey="Coverage gap" fill="var(--destructive)" barSize={14} radius={[4, 4, 0, 0]} />
-            <Line type="stepAfter" dataKey="AI staff capacity" stroke="var(--primary)" strokeWidth={2.5} dot={false} />
-            <Line type="stepAfter" dataKey="Fixed capacity" stroke="var(--muted-foreground)" strokeDasharray="5 4" strokeWidth={1.5} dot={false} />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-    </section>
-  );
-}
-
-function Recommendation(p: {
-  plan: ReturnType<typeof computePlan>; scenario: ScenarioId; closure: boolean; delayWave: boolean;
-  editing: boolean; setEditing: (v: boolean) => void; manualAdj: number; setManualAdj: (v: number) => void;
-  approved: boolean; setApproved: (v: boolean) => void;
-}) {
-  const { plan } = p;
-  const extra = plan.peakStaff - FIXED_STAFF;
-  const start = plan.firstGap?.hour ?? plan.peakStart;
-  const headline = extra > 0 ? `Add ${plan.categories.ramp.add > 0 ? `${plan.categories.ramp.add} ramp` : extra} staff at ${fmtHour(start)}` : "Keep fixed staffing of 9 per hour";
-  const reasons = [
-    `Workload rises above 80% of the daily peak between ${fmtHour(plan.peakStart)} and ${fmtHour(plan.peakEnd)}, peaking at ${plan.peak.workload} points.`,
-    extra > 0 ? `Fixed staffing covers only ${plan.peakCovFixed}% of peak workload, leaving ${plan.fixedUnder} understaffed hour${plan.fixedUnder === 1 ? "" : "s"}.` : `Fixed staffing already covers ${plan.peakCovFixed}% of peak workload.`,
-    extra > 0 ? "Reserve one fueling specialist for overlapping service requests." : "Fueling demand stays within the existing specialist rota.",
-    `Scenario "${SCENARIOS[p.scenario].label}" applies a ×${SCENARIOS[p.scenario].multiplier.toFixed(2)} demand multiplier to the baseline.`,
-    ...(p.closure ? ["One ramp zone is closed, reducing effective capacity per employee by 15%."] : []),
-    ...(p.delayWave ? ["A 90-minute delay wave shifts midday arrivals into the 2–5 PM window, compounding overlap."] : []),
-  ];
-  const confColor = plan.confidence >= 80 ? "bg-success" : plan.confidence >= 65 ? "bg-warning" : "bg-destructive";
-  return (
-    <section className={`${card} flex flex-col p-5`}>
-      <h2 className="font-display text-lg font-semibold">AI staffing recommendation</h2>
-      <div className="mt-3 rounded-xl bg-navy p-4 text-navy-foreground">
-        <p className="font-display text-2xl font-bold">{headline}</p>
-        <p className="mt-1 text-sm text-navy-muted">
-          Workload rises above 80% between {fmtHour(plan.peakStart)} and {fmtHour(plan.peakEnd)}. {extra > 0 ? "The system recommends additional ramp coverage during this period while keeping normal staffing during lower-demand hours." : "No added coverage is needed; normal staffing holds through the day."}
-        </p>
-      </div>
-      <ul className="mt-4 space-y-2 text-sm">
-        {reasons.map((r) => <li key={r} className="flex gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" />{r}</li>)}
-      </ul>
-      {plan.delayReduction > 0 && <p className="mt-3 text-sm text-muted-foreground">Compared with fixed staffing, SurgeGuard reduces projected service delay while keeping the rest of the day at normal staffing levels.</p>}
-      <div className="mt-4">
-        <div className="flex justify-between text-sm"><span className="font-medium">Forecast confidence</span><span className="font-mono font-semibold">{plan.confidence}%</span></div>
-        <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-muted"><div className={`h-full rounded-full transition-all ${confColor}`} style={{ width: `${plan.confidence}%` }} /></div>
-        <p className="mt-1 text-xs text-muted-foreground">Lower with higher surge and active disruptions — treat as a planning range, not a guarantee.</p>
-      </div>
-      {p.editing && (
-        <div className="mt-4 flex items-center justify-between rounded-lg border border-border p-3 text-sm">
-          <span>Manager adjustment to peak hours</span>
-          <div className="flex items-center gap-2">
-            <button aria-label="Decrease" onClick={() => p.setManualAdj(p.manualAdj - 1)} className="rounded-md border border-border p-1 hover:bg-muted"><Minus className="h-4 w-4" /></button>
-            <span className="w-8 text-center font-mono">{p.manualAdj > 0 ? `+${p.manualAdj}` : p.manualAdj}</span>
-            <button aria-label="Increase" onClick={() => p.setManualAdj(p.manualAdj + 1)} className="rounded-md border border-border p-1 hover:bg-muted"><Plus className="h-4 w-4" /></button>
-          </div>
-        </div>
-      )}
-      <div className="mt-auto pt-4">
-        <p className="mb-3 flex items-center gap-2 text-xs text-muted-foreground"><ShieldCheck className="h-4 w-4 text-success" />Recommendation only. The FBO manager reviews and approves every staffing change.</p>
-        {p.approved ? (
-          <div className="flex items-center justify-between rounded-lg bg-success-soft p-3 text-sm font-medium text-success">
-            <span className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4" />Plan approved by FBO manager</span>
-            <button onClick={() => p.setApproved(false)} className="underline">Undo</button>
-          </div>
-        ) : (
-          <div className="flex gap-2">
-            <button onClick={() => { p.setApproved(true); p.setEditing(false); }} className="flex-1 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Approve plan</button>
-            <button onClick={() => p.setEditing(!p.editing)} className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium hover:bg-muted"><Pencil className="h-4 w-4" />{p.editing ? "Done" : "Edit plan"}</button>
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function Categories({ plan, closure, delayWave }: { plan: ReturnType<typeof computePlan>; closure: boolean; delayWave: boolean }) {
-  const c = plan.categories;
-  const items = [
-    { icon: Wrench, name: "Ramp agents", ...c.ramp, reason: closure ? "Extra tows and repositioning around the closed zone." : "Marshalling, chocks and towing scale fastest with arrivals." },
-    { icon: Fuel, name: "Fueling specialists", ...c.fuel, reason: delayWave ? "Delayed arrivals request fuel at the same time." : "Reserve capacity for overlapping fuel requests." },
-    { icon: UserRound, name: "Passenger-service staff", ...c.pax, reason: "Lounge, baggage and ground-transport handoffs for larger cabins." },
-  ];
-  return (
-    <section className={`${card} p-5`}>
-      <h2 className="font-display text-lg font-semibold">Peak-window staff breakdown</h2>
-      <p className="text-sm text-muted-foreground">{fmtHour(plan.peakStart)} – {fmtHour(plan.peakEnd)}</p>
-      <div className="mt-4 space-y-3">
-        {items.map((i) => (
-          <div key={i.name} className="flex items-start gap-3 rounded-xl border border-border p-3">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-accent"><i.icon className="h-5 w-5 text-primary" /></div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline justify-between gap-2">
-                <p className="font-medium">{i.name}</p>
-                <p className="font-display text-xl font-bold">{i.base + i.add}{i.add > 0 && <span className="ml-1 text-sm font-semibold text-success">+{i.add}</span>}</p>
-              </div>
-              <p className="text-xs text-muted-foreground">{i.reason}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function Impact({ plan }: { plan: ReturnType<typeof computePlan> }) {
-  const rows = [
-    { label: "Understaffed hours", fixed: plan.fixedUnder, ai: plan.aiUnder, better: plan.aiUnder < plan.fixedUnder },
-    { label: "Estimated service-delay minutes", fixed: plan.fixedDelay, ai: plan.aiDelay, better: plan.aiDelay < plan.fixedDelay },
-    { label: "Peak coverage", fixed: `${plan.peakCovFixed}%`, ai: `${plan.peakCovAi}%`, better: plan.peakCovAi > plan.peakCovFixed },
-    { label: "Additional staffing hours", fixed: 0, ai: `+${plan.extraHours}`, better: false },
-    { label: "Aircraft handled in peak window", fixed: `${plan.handledFixed} / ${plan.peakAircraft}`, ai: `${plan.handledAi} / ${plan.peakAircraft}`, better: plan.handledAi > plan.handledFixed },
-  ];
-  return (
-    <section className={`${card} p-5`}>
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <h2 className="font-display text-lg font-semibold">Impact comparison</h2>
-        <p className="font-display text-2xl font-bold text-success">−{plan.fixedDelay - plan.aiDelay} delay min</p>
-      </div>
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead><tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
-            <th className="py-2 font-medium">Metric</th><th className="py-2 text-right font-medium">Fixed staffing (9)</th><th className="py-2 text-right font-medium text-primary">SurgeGuard</th>
-          </tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.label} className="border-b border-border last:border-0">
-                <td className="py-3">{r.label}</td>
-                <td className="py-3 text-right font-mono">{r.fixed}</td>
-                <td className={`py-3 text-right font-mono text-base font-semibold ${r.better ? "text-success" : ""}`}>{r.ai}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
-const statusStyle: Record<HourRow["status"], string> = {
-  "On plan": "bg-success-soft text-success",
-  "Peak watch": "bg-warning-soft text-foreground",
-  "Coverage gap": "bg-danger-soft text-destructive",
-};
-
-function HourlyTable({ rows }: { rows: HourRow[] }) {
-  return (
-    <section className={`${card} p-5`}>
-      <h2 className="font-display text-lg font-semibold">Hourly operations</h2>
-      <p className="text-sm text-muted-foreground">Coverage = share of workload that fixed staffing can serve.</p>
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[640px] text-sm">
-          <thead><tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
-            {["Time", "Arrivals", "Workload", "Fixed staff", "AI staff", "Coverage", "Status"].map((h) => <th key={h} className="py-2 font-medium">{h}</th>)}
-          </tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.hour} className="border-b border-border last:border-0">
-                <td className="py-2.5 font-medium">{fmtHour(r.hour)}</td>
-                <td className="py-2.5 font-mono">{r.arrivals}</td>
-                <td className="py-2.5 font-mono">{r.workload}</td>
-                <td className="py-2.5 font-mono text-muted-foreground">{r.fixedStaff}</td>
-                <td className={`py-2.5 font-mono font-semibold ${r.aiStaff > r.fixedStaff ? "text-primary" : ""}`}>{r.aiStaff}{r.aiStaff > r.fixedStaff && ` (+${r.aiStaff - r.fixedStaff})`}</td>
-                <td className="py-2.5 font-mono">{r.coverage}%</td>
-                <td className="py-2.5"><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyle[r.status]}`}>{r.status}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
+function Shift({count,title,time,sub}:{count:number;title:string;time:string;sub:string}) {return <div className="flex gap-3"><span className="grid h-8 w-8 shrink-0 place-items-center rounded bg-accent font-mono font-semibold text-primary">{count}</span><div><p className="font-medium">{title}</p><p className="text-xs text-primary">{time}</p><p className="mt-1 text-xs text-muted-foreground">{sub}</p></div></div>;}
+function Categories({plan:p}:{plan:Plan}) {const items=[{icon:Wrench,name:'Ramp agents',...p.categories.ramp,reason:'Simultaneous 3-person wing-walker tow teams and baggage handling.'},{icon:Fuel,name:'Fueling specialists',...p.categories.fuel,reason:'Heavy-jet Jet-A uplifts, top-off and afternoon shift handoff.'},{icon:UserRound,name:'Passenger-service / CSRs',...p.categories.pax,reason:`VIP escort, catering and ground transport. ${p.shifts.csrFloat?'Includes 1 cross-utilized float.':'No float needed.'}`}];return <section><SectionTitle index="03" title="Peak staff-category breakdown"/><div className="mt-4 grid gap-3 md:grid-cols-3">{items.map(i=><div key={i.name} className={`${itemCard} p-4`}><div className="flex items-center gap-2 text-sm font-medium"><i.icon className="h-4 w-4 text-primary"/>{i.name}</div><div className="mt-3 flex items-center gap-3"><span className="font-display text-2xl text-muted-foreground">{i.base}</span><MoveRight className="h-4 w-4 text-muted-foreground"/><span className="font-display text-3xl font-bold text-primary">{i.base+i.add}</span><span className="text-xs text-success">{i.add?`+${i.add} coverage`:p.shifts.csrFloat?'1 float':'baseline'}</span></div><p className="mt-1 text-[10px] text-muted-foreground">FIXED BASELINE → SURGEGUARD PEAK</p><p className="mt-3 text-xs leading-relaxed text-muted-foreground">{i.reason}</p></div>)}</div></section>;}
+function Impact({plan:p}:{plan:Plan}) {const rows=[['Understaffed hours',`${p.fixedUnder} hrs`,`${p.aiUnder} hrs`],['Estimated service-delay minutes',`${p.fixedDelay} min`,`${p.aiDelay} min`],['Peak workload coverage',`${p.peakCovFixed}%`,`${p.peakCovAi}%`],['Bridge / overtime staffing hours','0',`${p.extraHours} hrs`],['Quiet-hour idle labor saved','0',`${p.idleHoursSaved} hrs (redeployed)`],['Aircraft handled on-time in peak',`${p.handledFixed} / ${p.peakAircraft}`,`${p.handledAi} / ${p.peakAircraft}`],['3-person tow crew feasibility',p.safetyFixed?'Crew allocation modeled':'At risk — concurrent crew shortage',p.safetyAi?'Full 3-person tow crews modeled':'At risk — review override']];return <section className="border-t border-border pt-5"><SectionTitle index="04" title="Fixed baseline vs. SurgeGuard"/><div className="mt-4 overflow-x-auto"><table className="w-full min-w-[590px] text-sm"><thead><tr className="border-b border-border text-left text-xs text-muted-foreground"><th className="py-3">Impact measure</th><th>Fixed staffing · 9</th><th className="text-primary">SurgeGuard AI</th></tr></thead><tbody>{rows.map(([label,fixed,ai])=><tr key={label} className="border-b border-border"><td className="py-3">{label}</td><td className="text-muted-foreground">{fixed}</td><td className={`font-medium ${ai?.startsWith('At risk')?'text-destructive':'text-success'}`}>{ai}</td></tr>)}</tbody></table></div><div className="mt-4 flex flex-wrap items-center justify-between gap-4 bg-secondary p-4"><div><p className="text-xs font-semibold text-muted-foreground">ILLUSTRATIVE FINANCIAL ROI</p><p className="mt-1 font-display text-xl font-bold">${p.otCost.toLocaleString()} targeted bridge / overtime <span className="text-muted-foreground">→</span> <span className="text-success">${p.revenueProtected.toLocaleString()} potential sales protected</span></p></div><Fuel className="h-6 w-6 text-primary"/><p className="w-full text-[10px] text-muted-foreground">Synthetic commercial estimate: $60 / incremental staff-hour; bridge premium assumed for 3 hours plus 2-hour fuel hold. Fuel sales and event fees are illustrative, not guaranteed revenue or verified NATA compliance.</p></div></section>;}
+function HourlyTable({plan:p}:{plan:Plan}) {return <table className="w-full min-w-[1000px] text-xs"><thead><tr className="border-b border-border text-left text-muted-foreground">{['Time','Arrivals','Jet-A uplift (gal)','Workload','Fixed (9)','AI staff','Fixed coverage','Active bottleneck','Status'].map(h=><th key={h} className="py-3 pr-3 font-medium">{h}</th>)}</tr></thead><tbody>{p.rows.map(r=><tr key={r.hour} className="border-b border-border"><td className="py-3 font-medium">{fmtHour(r.hour)}</td><td>{r.arrivals}</td><td className="font-mono">{r.fuelGallons.toLocaleString()}</td><td className="font-mono">{r.workload}</td><td className="text-muted-foreground">9</td><td className="font-mono font-semibold text-primary">{r.aiStaff}</td><td>{r.coverage}%</td><td className="max-w-48 pr-2 text-warning">{r.bottlenecks.join(' / ')||'None'}</td><td><span className={`rounded px-2 py-1 text-[10px] ${r.status==='Coverage gap'?'bg-danger-soft text-destructive':r.status==='Peak watch'?'bg-warning-soft text-foreground':'bg-success-soft text-success'}`}>{r.status}</span></td></tr>)}</tbody><caption className="caption-bottom pt-3 text-left text-[10px] text-muted-foreground">Workload includes selected mitigations; fixed coverage uses unmitigated workload. Synthetic fleet scales to scenario demand; fractional scaling is rounded by hour.</caption></table>;}
+function Manifest() {return <table className="w-full min-w-[1450px] text-xs"><thead><tr className="border-b border-border text-left text-muted-foreground">{['Flight ID','Arrival','Departure','Aircraft type','Passengers','Fuel required','Fuel gal','Passenger service','Ramp min','Parking zone','Priority','Score'].map(h=><th key={h} className="py-3 pr-3 font-medium">{h}</th>)}</tr></thead><tbody>{FLEET.map(a=><tr key={a.flightId} className={`border-b border-border ${a.flightId==='SB-104'?'bg-warning-soft':''}`}><td className="py-3 font-mono font-semibold">{a.flightId}</td><td>{a.arrivalTime}</td><td>{a.departureTime}</td><td>{a.aircraftType}</td><td>{a.passengers}</td><td>{a.fueling?'Yes':'No'}</td><td>{a.fuelGallons.toLocaleString()}</td><td>{a.passengerService?'Yes':'No'}</td><td>{a.rampMinutes}</td><td>{a.parkingZone}</td><td>{a.priority}</td><td>{a.score.toFixed(1)}</td></tr>)}</tbody><caption className="caption-bottom pt-3 text-left text-[10px] text-muted-foreground">18 seeded synthetic aircraft · reference manifest before demand scaling or injected messages · SB-104 is an illustrative blocked turnaround at 14:20, not a real aircraft. Aggregate forecasts are calibrated to the supplied hourly baseline.</caption></table>;}

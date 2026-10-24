@@ -1,23 +1,21 @@
-import { describe, it, expect } from "vitest";
-import { computePlan } from "./surge";
-
-const base = { surge: 0, closure: false, delayWave: false } as const;
-
-describe("SurgeGuard rules", () => {
-  it("medium demand recommends 12 staff at peak vs fixed 9", () => {
-    const p = computePlan({ ...base, scenario: "sb-medium" });
-    expect(p.peakStaff).toBe(12);
-    expect(p.peak.workload).toBe(88);
-    expect(p.peakStart).toBe(14);
-    expect(p.peakEnd).toBe(17);
-  });
-  it("all four scenarios differ in peak workload", () => {
-    const peaks = (["ordinary", "sb-low", "sb-medium", "sb-high"] as const).map((s) => computePlan({ ...base, scenario: s }).peak.workload);
-    expect(new Set(peaks).size).toBe(4);
-  });
-  it("delay wave raises peak workload; closure raises staff", () => {
-    const m = computePlan({ ...base, scenario: "sb-medium" });
-    expect(computePlan({ ...base, scenario: "sb-medium", delayWave: true }).peak.workload).toBeGreaterThan(m.peak.workload);
-    expect(computePlan({ ...base, scenario: "sb-medium", closure: true }).peakStaff).toBeGreaterThan(m.peakStaff);
-  });
+import {describe,it,expect} from 'vitest';
+import {computePlan,FLEET,parseTelex,HEAVY_PRESET,QUICK_PRESET,dispatchBrief} from './surge';
+const base={scenario:'sb-medium',surge:0,closure:false,delayWave:false} as const;
+describe('SurgeGuard operational rules',()=>{
+ it('uses 9 employees, 8-unit capacity and 5/2/2 category baseline',()=>{const p=computePlan(base);expect(p.rows[0]?.fixedCapacity).toBe(72);expect(p.cap).toBe(8);expect(p.categories.ramp.base).toBe(5);expect(p.categories.fuel.base).toBe(2);expect(p.categories.pax.base).toBe(2);});
+ it('medium demand preserves raw 88 peak and recommends 12 including congestion adjustment',()=>{const p=computePlan(base);expect(p.peak.rawWorkload).toBe(88);expect(p.peakStaff).toBe(12);expect(p.categories.ramp.add).toBe(2);expect(p.categories.fuel.add).toBe(1);expect(p.categories.pax.add).toBe(0);});
+ it('all scenario multipliers produce different workloads',()=>{expect(new Set((['ordinary','sb-low','sb-medium','sb-high'] as const).map(scenario=>computePlan({...base,scenario}).peak.workload)).size).toBe(4);});
+ it('closure reduces effective capacity by exactly 20%',()=>{const p=computePlan({...base,closure:true});expect(p.cap).toBeCloseTo(6.4);expect(p.peakStaff).toBeGreaterThan(computePlan(base).peakStaff);});
+ it('congested heavy towing reserves 3 crew and applies 1.35 multiplier',()=>{const p=computePlan(base);expect(p.towCrew).toBe(3);expect(p.wingMultiplier).toBe(1.35);expect(p.peak.workload).toBe(Math.round(88+88*.2*.35));});
+ it('pre-stage saves 45 of the 60-minute 3-person dig-out',()=>{const p=computePlan(base),q=computePlan({...base,preStage:false});expect(p.digOutMinutes).toBe(60);expect(p.savedRampMinutes).toBe(45);expect(q.rows.find(r=>r.hour===14)?.workload).toBe((p.rows.find(r=>r.hour===14)?.workload??0)+24);expect(p.preStageTime).toBe('11:30 AM');});
+ it('more than 5000 gal triggers 40-minute refill and proactive 1 PM top-off',()=>{const p=computePlan(base),q=computePlan({...base,topOff:false});expect(p.fuelRisk).toBe(true);expect(p.fuelRiskHour).toBe(15);expect(p.refillMinutes).toBe(40);expect(p.topOffTime).toBe('1:00 PM');expect(q.peak.workload).toBeGreaterThan(p.peak.workload);});
+ it('delay wave increases afternoon peak',()=>{expect(computePlan({...base,delayWave:true}).peak.workload).toBeGreaterThan(computePlan(base).peak.workload);});
+ it('Monday exodus moves peak to 9 AM–1 PM and top-off ahead of the peak',()=>{const p=computePlan({...base,wave:'exodus'});expect(p.peakStart).toBe(9);expect(p.peakEnd).toBe(12);expect(p.peak.hour).toBe(10);expect(p.topOffTime).toBe('8:00 AM');});
+ it('shift blocks use 10 AM–6:30 PM bridge, 2–4 PM overtime and one existing CSR',()=>{const p=computePlan(base);expect(p.shifts.bridgeStaff).toBe(2);expect(p.shifts.bridgeStart).toBe('10:00 AM');expect(p.shifts.bridgeEnd).toBe('6:30 PM');expect(p.shifts.fuelOvertime).toBe(1);expect(p.shifts.overtimeStart).toBe('2:00 PM');expect(p.shifts.overtimeEnd).toBe('4:00 PM');expect(p.shifts.csrFloat).toBe(1);expect(p.otCost).toBe(480);});
+ it('heavy preset parses 2 heavy jets, 3600 gal, 3 crew at 14:15 and spikes demand',()=>{const a=parseTelex(HEAVY_PRESET).load;expect(a?.aircraft).toBe(2);expect(a?.fuelGallons).toBe(3600);expect(a?.crew).toBe(3);expect(a?.hour).toBe(14);expect(computePlan({...base,injections:a?[a]:[]}).peakStaff).toBeGreaterThan(computePlan(base).peakStaff);});
+ it('quick-turn Global 7500 parses 35-minute turn at 15:00',()=>{const a=parseTelex(QUICK_PRESET).load;expect(a?.quickTurn).toBe(true);expect(a?.heavy).toBe(true);expect(a?.hour).toBe(15);});
+ it('unknown and out-of-window messages are rejected',()=>{expect(parseTelex('hello').load).toBeUndefined();expect(parseTelex('G650 at 23:00').load).toBeUndefined();});
+ it('manifest has 18 synthetic records including exact SB-104 attributes',()=>{expect(FLEET).toHaveLength(18);const a=FLEET.find(a=>a.flightId==='SB-104');expect(a?.arrivalTime).toBe('14:20');expect(a?.departureTime).toBe('17:10');expect(a?.fuelGallons).toBe(1850);expect(a?.rampMinutes).toBe(42);expect(a?.passengers).toBe(9);});
+ it('negative override raises delay and flags tow allocation risk',()=>{const p=computePlan({...base,manualAdj:-3});expect(p.aiUnder).toBeGreaterThan(0);expect(p.safetyAi).toBe(false);expect(p.aiDelay).toBeGreaterThan(0);});
+ it('dispatch contains model-derived roster allocation',()=>{const p=computePlan({...base,manualAdj:1});const brief=dispatchBrief(p,'Oct 24 2026','sb-medium');expect(brief).toContain(`Peak coverage: ${p.peakStaff} staff`);expect(brief).toContain(`${p.shifts.bridgeStaff} qualified ramp techs`);});
 });
