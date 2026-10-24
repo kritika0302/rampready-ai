@@ -61,9 +61,9 @@ export function generateFleet(seed = 2026): Aircraft[] {
   const fleet: Aircraft[] = [];
   let n = 1;
   HOURS.forEach((h, i) => {
-    const count = Math.max(1, Math.round(BASELINE[i] / 8));
+    const count = Math.max(1, Math.round(BASELINE[i]! / 8));
     for (let k = 0; k < count; k++) {
-      const t = TYPES[Math.floor(r() * TYPES.length)];
+      const t = TYPES[Math.floor(r() * TYPES.length)]!;
       const a = {
         flightId: `SG${String(100 + n++)}`,
         arrivalHour: h,
@@ -111,7 +111,7 @@ export function computePlan(inp: Inputs) {
 
   if (inp.closure) {
     // longer tows / repositioning in the busy midday window
-    wl = wl.map((w, i) => (HOURS[i] >= 11 && HOURS[i] <= 16 ? w * 1.08 : w));
+    wl = wl.map((w, i) => (HOURS[i]! >= 11 && HOURS[i]! <= 16 ? w * 1.08 : w));
   }
   if (inp.delayWave) {
     // 90-minute delay: shift 30% of 11AM–1PM arrivals into 2–4PM, plus overlap penalty
@@ -119,12 +119,12 @@ export function computePlan(inp: Inputs) {
     const dst = [6, 7, 8];
     let moved = 0, movedArr = 0;
     src.forEach((i) => {
-      moved += wl[i] * 0.3; wl[i] *= 0.7;
-      movedArr += arrivals[i] * 0.3; arrivals[i] *= 0.7;
+      moved += wl[i]! * 0.3; wl[i] = wl[i]! * 0.7;
+      movedArr += arrivals[i]! * 0.3; arrivals[i] = arrivals[i]! * 0.7;
     });
     dst.forEach((i) => {
-      wl[i] = (wl[i] + moved / 3) * 1.08;
-      arrivals[i] += movedArr / 3;
+      wl[i] = (wl[i]! + moved / 3) * 1.08;
+      arrivals[i] = arrivals[i]! + movedArr / 3;
     });
   }
 
@@ -133,14 +133,14 @@ export function computePlan(inp: Inputs) {
   wl.forEach((w, i) => w >= maxW * 0.8 && peakIdxs.add(i));
 
   const rows: HourRow[] = HOURS.map((h, i) => {
-    const workload = Math.round(wl[i]);
+    const workload = Math.round(wl[i]!);
     let aiStaff = Math.max(FIXED_STAFF, Math.ceil(workload / cap - 0.1));
     if (peakIdxs.has(i) && inp.manualAdj) aiStaff = Math.max(1, aiStaff + inp.manualAdj);
     const fixedCapacity = FIXED_STAFF * cap;
     const gap = workload - fixedCapacity > 0.75 ? workload - fixedCapacity : 0;
     const coverage = Math.min(100, Math.round((fixedCapacity / Math.max(1, workload)) * 100));
     const status: HourRow["status"] = gap > 0 ? "Coverage gap" : workload >= fixedCapacity * 0.85 ? "Peak watch" : "On plan";
-    return { hour: h, arrivals: Math.round(arrivals[i]), workload, fixedStaff: FIXED_STAFF, aiStaff, fixedCapacity: Math.round(fixedCapacity), aiCapacity: Math.round(aiStaff * cap), gap: Math.round(gap), coverage, status };
+    return { hour: h, arrivals: Math.round(arrivals[i]!), workload, fixedStaff: FIXED_STAFF, aiStaff, fixedCapacity: Math.round(fixedCapacity), aiCapacity: Math.round(aiStaff * cap), gap: Math.round(gap), coverage, status };
   });
 
   const peak = rows.reduce((a, b) => (b.workload > a.workload ? b : a));
