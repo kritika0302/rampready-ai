@@ -145,8 +145,8 @@ export function computePlan(inp: Inputs) {
 
   const peak = rows.reduce((a, b) => (b.workload > a.workload ? b : a));
   const peakRows = rows.filter((_, i) => peakIdxs.has(i));
-  const peakStart = peakRows[0].hour;
-  const peakEnd = peakRows[peakRows.length - 1].hour + 1;
+  const peakStart = peakRows[0]!.hour;
+  const peakEnd = peakRows[peakRows.length - 1]!.hour + 1;
   const peakStaff = Math.max(...rows.map((r) => r.aiStaff));
   const firstGap = rows.find((r) => r.aiStaff > FIXED_STAFF);
 
@@ -173,7 +173,7 @@ export function computePlan(inp: Inputs) {
   const cat = { ramp: 4, fuel: 3, pax: 2 };
   const add = { ramp: 0, fuel: 0, pax: 0 };
   const order: (keyof typeof cat)[] = ["ramp", "ramp", "ramp", "fuel", "pax", "ramp", "fuel", "pax"];
-  for (let k = 0; k < extra; k++) add[order[k % order.length]]++;
+  for (let k = 0; k < extra; k++) add[order[k % order.length]!]++;
 
   return {
     rows, peak, peakStart, peakEnd, peakStaff, firstGap, fixedDelay, aiDelay, delayReduction,
